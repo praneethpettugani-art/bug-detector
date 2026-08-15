@@ -18,12 +18,14 @@ bug-detector/                       # backend engine repository (this repo)
 │   ├── engine/                      # scan orchestration, job scheduler, task workers
 │   │   ├── orchestrator.py
 │   │   └── worker.py
-│   ├── analyzers/                   # modular analyzer plugins (python, c/c++, accessibility, etc.)
+│   ├── analyzers/                   # modular analyzer plugins (python, c/c++, accessibility, DOM, etc.)
 │   │   ├── python_analyzer.py
 │   │   ├── c_cpp_analyzer.py
-│   │   └── accessibility.py
+│   │   ├── accessibility.py
+│   │   └── dom_analyzer.py          # DOM snapshot and client-side rule analysis
 │   ├── storage/                     # persistence layer adapters (Postgres, object storage clients)
 │   │   ├── db.py
+│   │   │   
 │   │   └── object_store.py
 │   ├── queue/                       # queue clients / background job connectors (Redis / BullMQ wrappers)
 │   │   └── redis_queue.py
@@ -48,7 +50,8 @@ Notes and rationale
 
 - backend/: Keep all runtime engine code under a single package so import paths and packaging are straightforward.
 - analyzers/: Each analyzer is a plugin-like module. Keep a stable plugin interface (e.g., analyze(path, config) -> findings) so new analyzers (JS linter, accessibility rules, network heuristics) can be added without changing orchestration logic.
-- crawler/: The long-term plan calls for an asynchronous headless runner; the code in crawler/ should be a thin adapter that can run either Playwright, Puppeteer, or a custom headless runner. Keep the runner API consistent: discover(url) -> sitemap; fetch_page(url) -> page_payload.
+- dom_analyzer: Add a DOM-focused analyzer that consumes DOM snapshots from the crawler and inspects client-side HTML/JS for issues such as DOM-based XSS sinks, unsafe inline event handlers, missing CSP directives, and client-side security/quality heuristics. It should expose the same plugin interface (e.g., analyze(snapshot, config) -> findings) so the orchestrator can treat it like other analyzers.
+- crawler/: The long-term plan calls for an asynchronous headless runner; the code in crawler/ should be a thin adapter that can run either Playwright, Puppeteer, or a custom headless runner. Keep the runner API consistent: discover(url) -> sitemap; fetch_page(url) -> page_payload. The fetch_page/page_payload should include a DOM snapshot (outerHTML), rendered scripts, and optionally a HAR to support DOM and network analyzers.
 - queue/: Provide adapters for queuing backends (Redis, RQ, Celery). The orchestrator/worker should be queue-agnostic and interact via a small abstraction.
 - storage/: Use Postgres for relational records (scans, pages, findings) and an object store (S3-compatible) for snapshots and report artifacts.
 - docs/: Keep architectural notes, API contracts (OpenAPI), and onboarding docs here.
@@ -66,22 +69,24 @@ Suggested API surface (examples)
 - GET /scans/:id/status -> { status, progress }
 - GET /scans/:id/results -> { sitemap, findings }
 - WS /scans/:id/progress -> real-time progress messages
+- GET /scans/:id/pages/:page_id/dom -> { dom_snapshot, rendered_scripts, har }
 
 Example development workflow
 
 1. Implement a lightweight local runner in backend/engine/orchestrator.py that accepts simple scan requests and stores results in storage/
-2. Add unit tests in tests/ that validate analyzer modules (use samples/ as fixtures)
-3. Start a minimal API in backend/api/server.py to accept POST /scans and respond with a fake sitemap for early UI development
-4. Create the `bug-detector-ui` repo (separate) and point its VITE_API_BASE to the backend API
+2. Ensure the crawler captures DOM snapshots and raw page payloads so DOM analyzers and accessibility rules can run against rendered HTML. Add unit tests in tests/ that validate analyzer modules (use samples/ as fixtures)
+3. Add unit tests in tests/ that validate analyzer modules (use samples/ as fixtures)
+4. Start a minimal API in backend/api/server.py to accept POST /scans and respond with a fake sitemap for early UI development
+5. Create the `bug-detector-ui` repo (separate) and point its VITE_API_BASE to the backend API
 
 What I added
 
-- docs/FOLDER_STRUCTURE.md describing the recommended folder layout and next steps for separating UI into bug-detector-ui and keeping this repo backend-only.
+- docs/FOLDER_STRUCTURE.md describing the recommended folder layout and next steps for separating UI into bug-detector-ui and keeping this repo backend-only. I also added guidance for a DOM-focused analyzer and notes about including DOM snapshots in the crawler payload to support client-side analysis.
 
 Next steps I can take for you
 
 - Create the `bug-detector-ui` starter repo and push the frontend scaffold (React + Vite) I prepared earlier.
-- Open a branch in this repo and create the backend top-level folders and placeholder __init__.py files and basic module stubs (api/server.py, engine/orchestrator.py, analyzers/__init__.py, etc.) to make the structure importable and testable.
+- Open a branch in this repo and create the backend top-level folders and placeholder __init__.py files and basic module stubs (api/server.py, engine/orchestrator.py, analyzers/__init__.py, etc.) and include a dom_analyzer.py stub.
 - Add a minimal local mock server (Flask/FastAPI) under backend/api for UI integration testing.
 
-If you want me to proceed with creating the frontend repo or adding the stub files in this repo, tell me which action to take and I will commit the changes to a branch (I used `docs/folder-structure` for this doc).
+If you want me to proceed with creating the frontend repo or adding the stub files in this repo, tell me which action to take and I will commit the changes to a branch (I used `docs/folder-structu...
